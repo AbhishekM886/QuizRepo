@@ -1,0 +1,136 @@
+---
+- name: Provision Azure 3-tier Environment
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    resource_group: Azure_3_Tier_Setup_RSG
+    location: eastus
+    vnet_name: 3_tier_vnet
+    subnet_web_name: web_subnet
+    subnet_app_name: app_subnet
+    subnet_db_name: db_subnet
+    vm_size_web: Standard_DS2_v2
+    vm_size_app: Standard_DS2_v2
+    vm_size_db: Standard_DS2_v2
+    admin_username: azureuser
+    admin_password: MyPassword123
+    image_publisher: MicrosoftSQLServer
+    image_offer: SQL2019-WS2019
+    image_sku: Enterprise-WS2019
+    ssh_public_key_path: /home/abhishek/.ssh/id_rsa.pub
+
+  tasks:
+    - name: Create Resource Group
+      azure_rm_resourcegroup:
+        name: "{{ resource_group }}"
+        location: "{{ location }}"
+      register: rg_result
+
+    - name: Create Virtual Network
+      azure_rm_virtualnetwork:
+        resource_group: "{{ resource_group }}"
+        name: "{{ vnet_name }}"
+        address_prefixes_cidr:
+          - "10.0.0.0/16"
+      register: vnet_result
+
+    - name: Create network security group
+      azure_rm_securitygroup:
+        resource_group: "{{ resource_group }}"
+        name: db_nsg
+        rules:
+          - name: allow_ssh
+            protocol: Tcp
+            destination_port_range: 22
+            access: Allow
+            direction: Inbound
+            priority: 100
+
+    - name: Create network interface
+      azure_rm_networkinterface:
+        resource_group: "{{ resource_group }}"
+        name: 3_tier_nic
+        virtual_network: 3_tier_vnet
+        subnet: db_subnet
+        security_group: db_nsg
+
+
+    - name: Create Web Subnet
+      azure_rm_subnet:
+        resource_group: "{{ resource_group }}"
+        virtual_network_name: "{{ vnet_name }}"
+        name: "{{ subnet_web_name }}"
+        address_prefix_cidr: "10.0.1.0/24"
+      register: subnet_web_result
+
+    - name: Create App Subnet
+      azure_rm_subnet:
+        resource_group: "{{ resource_group }}"
+        virtual_network_name: "{{ vnet_name }}"
+        name: "{{ subnet_app_name }}"
+        address_prefix_cidr: "10.0.2.0/24"
+      register: subnet_app_result
+
+    - name: Create DB Subnet
+      azure_rm_subnet:
+        resource_group: "{{ resource_group }}"
+        virtual_network_name: "{{ vnet_name }}"
+        name: "{{ subnet_db_name }}"
+        address_prefix_cidr: "10.0.3.0/24"
+      register: subnet_db_result
+
+    - name: Create Web VM
+      azure_rm_virtualmachine:
+        resource_group: "{{ resource_group }}"
+        name: web-vm
+        vm_size: "{{ vm_size_web }}"
+        admin_username: "{{ admin_username }}"
+        admin_password: "{{ admin_password }}"
+        ssh_public_keys:
+          - path: "/home/{{ admin_username }}/.ssh/authorized_keys"
+            key_data: "{{ lookup('file', ssh_public_key_path) }}"
+        image:
+          offer: UbuntuServer
+          publisher: Canonical
+          sku: "18.04-LTS"
+          version: latest
+        virtual_network_name: "{{ vnet_name }}"
+        subnet_name: "{{ subnet_web_name }}"
+      register: web_vm_result
+
+    - name: Create App VM
+      azure_rm_virtualmachine:
+        resource_group: "{{ resource_group }}"
+        name: app-vm
+        vm_size: "{{ vm_size_app }}"
+        admin_username: "{{ admin_username }}"
+        admin_password: "{{ admin_password }}"
+        ssh_public_keys:
+          - path: "/home/{{ admin_username }}/.ssh/authorized_keys"
+            key_data: "{{ lookup('file', ssh_public_key_path) }}"
+        image:
+          offer: UbuntuServer
+          publisher: Canonical
+          sku: "18.04-LTS"
+          version: latest
+        virtual_network_name: "{{ vnet_name }}"
+        subnet_name: "{{ subnet_app_name }}"
+      register: app_vm_result
+
+    - name: Create database VM
+      azure_rm_virtualmachine:
+        resource_group: "{{ resource_group }}"
+        name: "{{ vm_name }}"
+        vm_size: "{{ vm_size }}"
+        admin_username: "{{ admin_username }}"
+        admin_password: "{{ admin_password }}"
+        image:
+          publisher: "{{ image_publisher }}"
+          offer: "{{ image_offer }}"
+          sku: "{{ image_sku }}"
+          version: latest
+        network_interfaces:
+          - name: my_nic
+        state: present
